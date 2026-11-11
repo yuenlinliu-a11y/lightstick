@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <!-- 讓手機加入主畫面後變成全螢幕獨立 App -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="應援手燈">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#121212">
+  <title>應援手燈專屬 App</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f13; color: #fff; margin: 0; padding: 20px 16px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .app-container { width: 100%; max-width: 400px; background: #1a1a24; padding: 24px 20px; border-radius: 24px; box-shadow: 0 12px 32px rgba(0,0,0,0.8); text-align: center; border: 1px solid #2e2e3e; }
+    h1 { font-size: 22px; margin: 0 0 6px 0; letter-spacing: 1px; }
+    .status-badge { display: inline-block; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; background: #2c2c3a; color: #ff5252; margin-bottom: 18px; }
+    .status-badge.connected { background: rgba(0, 230, 118, 0.15); color: #00e676; }
+    .ble-btn { background: linear-gradient(135deg, #00c853, #009624); color: #fff; border: none; padding: 15px; width: 100%; border-radius: 14px; font-size: 17px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 15px rgba(0, 200, 83, 0.3); transition: 0.2s; }
+    .ble-btn:active { transform: scale(0.98); }
+    .section { background: #232332; border-radius: 16px; padding: 16px; margin-top: 16px; }
+    .section h3 { margin: 0 0 12px 0; font-size: 15px; color: #b0b0c0; }
+    .color-row { display: flex; align-items: center; justify-content: space-around; gap: 10px; }
+    input[type="color"] { width: 65px; height: 65px; border: none; border-radius: 50%; background: none; cursor: pointer; }
+    .preset-colors { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+    .dot { width: 34px; height: 34px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; }
+    input[type="range"] { width: 100%; height: 8px; accent-color: #7c4dff; cursor: pointer; }
+    .grid-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .mode-btn { background: #323248; color: #fff; border: 1px solid #454560; padding: 13px 10px; border-radius: 12px; font-size: 14px; font-weight: 600; cursor: pointer; transition: 0.15s; }
+    .mode-btn:active, .mode-btn.active { background: #6200ea; border-color: #9d46ff; box-shadow: 0 0 12px rgba(124, 77, 255, 0.5); }
+    .mode-off { grid-column: span 2; background: #3d232a; border-color: #6e3542; color: #ff8a80; }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <h1>✨ 應援手燈控制器</h1>
+    <div id="status" class="status-badge">● 藍牙未連線</div>
+    
+    <button class="ble-btn" id="bleConnectBtn">📲 搜尋並連結手燈 (BLE)</button>
+
+    <div class="section">
+      <h3>🎨 專屬應援色切換</h3>
+      <div class="color-row">
+        <input type="color" id="colorPicker" value="#800080">
+        <div class="preset-colors">
+          <div class="dot" style="background:#ff1744" onclick="setRGB(255,23,68)"></div>
+          <div class="dot" style="background:#00e5ff" onclick="setRGB(0,229,255)"></div>
+          <div class="dot" style="background:#d500f9" onclick="setRGB(213,0,249)"></div>
+          <div class="dot" style="background:#ffea00" onclick="setRGB(255,234,0)"></div>
+          <div class="dot" style="background:#00e676" onclick="setRGB(0,230,118)"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>☀️ 亮度調節</h3>
+      <input type="range" id="brightness" min="5" max="255" value="80">
+    </div>
+
+    <div class="section">
+      <h3>⚡ 7 段燈效模式</h3>
+      <div class="grid-modes">
+        <button class="mode-btn" onclick="sendBLE('m1')">1. 應援恆亮</button>
+        <button class="mode-btn" onclick="sendBLE('m2')">2. 柔和呼吸</button>
+        <button class="mode-btn" onclick="sendBLE('m3')">3. 動感跑馬</button>
+        <button class="mode-btn" onclick="sendBLE('m4')">4. 星光閃爍</button>
+        <button class="mode-btn" onclick="sendBLE('m5')">5. 心跳律動</button>
+        <button class="mode-btn" onclick="sendBLE('m6')">6. 中央擴散</button>
+        <button class="mode-btn mode-off" onclick="sendBLE('m0')">0. 關閉手燈電源</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+    const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+    let bleDevice, rxCharacteristic;
+
+    document.getElementById('bleConnectBtn').addEventListener('click', async () => {
+      try {
+        if (!navigator.bluetooth) {
+          alert('請使用 Android 的 Chrome 瀏覽器，或 iPhone 的 Bluefy 瀏覽器開啟此頁面！');
+          return;
+        }
+        bleDevice = await navigator.bluetooth.requestDevice({
+          filters: [{ name: 'Idol_LightStick' }],
+          optionalServices: [SERVICE_UUID]
+        });
+        bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+        const server = await bleDevice.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        rxCharacteristic = await service.getCharacteristic(CHAR_RX_UUID);
+
+        const st = document.getElementById('status');
+        st.innerText = '● 已連線：Idol_LightStick';
+        st.classList.add('connected');
+        document.getElementById('bleConnectBtn').innerText = '✅ 藍牙已連結 (點擊可重連)';
+      } catch (err) {
+        console.log(err);
+      }
+    });
+
+    function onDisconnected() {
+      const st = document.getElementById('status');
+      st.innerText = '● 手燈已斷線';
+      st.classList.remove('connected');
+    }
+
+    async function sendBLE(cmd) {
+      if (!rxCharacteristic) return alert('請先點擊上方綠色按鈕連結手燈！');
+      try {
+        const data = new TextEncoder().encode(cmd + '\n');
+        await rxCharacteristic.writeValue(data);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function setRGB(r, g, b) {
+      sendBLE(`c${r},${g},${b}`);
+    }
+
+    document.getElementById('colorPicker').addEventListener('change', (e) => {
+      const hex = e.target.value;
+      const r = parseInt(hex.substr(1,2), 16);
+      const g = parseInt(hex.substr(3,2), 16);
+      const b = parseInt(hex.substr(5,2), 16);
+      setRGB(r, g, b);
+    });
+
+    document.getElementById('brightness').addEventListener('change', (e) => {
+      sendBLE(`b${e.target.value}`);
+    });
+  </script>
+</body>
+</html>
